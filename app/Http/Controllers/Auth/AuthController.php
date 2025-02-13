@@ -8,6 +8,7 @@ use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Kreait\Firebase\Auth as FirebaseAuth;
 
@@ -223,12 +224,146 @@ class AuthController extends Controller
                 return response()->json(['error' => 'User not found'], 404);
             }
 
+            // Add profile image URL if exists
+            if ($user->profile_image) {
+                $user->profile_image_url = Storage::url($user->profile_image);
+            }
+
             return response()->json([
                 'user' => $user,
                 'firebase_uid' => $firebase_uid
             ]);
         } catch (\Exception $e) {
             return response()->json(['error' => 'User not found', 'message' => $e->getMessage()], 404);
+        }
+    }
+
+    public function updateProfile(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'firebase_uid' => 'required|string',
+                'name' => 'sometimes|string|max:255',
+                'password' => 'sometimes|string|min:8',
+                'date_of_birth' => 'sometimes|date',
+                'country_id' => 'sometimes|integer',
+                'profile_image' => 'sometimes|image|mimes:jpeg,png,jpg'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'error' => 'Validation failed',
+                    'messages' => $validator->errors()
+                ], 422);
+            }
+
+            // Get user
+            $user = User::where('firebase_uid', $request->firebase_uid)->first();
+            if (!$user) {
+                return response()->json(['error' => 'User not found'], 404);
+            }
+
+            // Update Firebase user if email or password is changed
+            $firebaseUpdates = [];
+            if ($request->has('email')) {
+                $firebaseUpdates['email'] = $request->email;
+            }
+            if ($request->has('password')) {
+                $firebaseUpdates['password'] = $request->password;
+            }
+            if ($request->has('name')) {
+                $firebaseUpdates['displayName'] = $request->name;
+            }
+
+            if (!empty($firebaseUpdates)) {
+                $this->auth->updateUser($user->firebase_uid, $firebaseUpdates);
+            }
+
+            // Handle profile image upload
+            if ($request->hasFile('profile_image')) {
+                // Delete old image if exists
+                if ($user->profile_image) {
+                    Storage::delete($user->profile_image);
+                }
+
+                // Store new image
+                $path = $request->file('profile_image')->store('profile-images', 'public');
+                $user->profile_image = $path;
+            }
+
+            // Update user data
+            $user->fill($request->only([
+                'name',
+                'date_of_birth',
+                'country_id',
+            ]));
+
+            if ($request->has('password')) {
+                $user->password = Hash::make($request->password);
+            }
+
+            $user->save();
+
+            // Add profile image URL to response
+            if ($user->profile_image) {
+                $user->profile_image_url = Storage::url($user->profile_image);
+            }
+
+            return response()->json([
+                'message' => 'Profile updated successfully',
+                'user' => $user
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Profile update error: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Failed to update profile',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function updateProfileImage(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'firebase_uid' => 'required|string',
+                'profile_image' => 'required|image|mimes:jpeg,png,jpg'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'error' => 'Validation failed',
+                    'messages' => $validator->errors()
+                ], 422);
+            }
+
+            $user = User::where('firebase_uid', $request->firebase_uid)->first();
+            if (!$user) {
+                return response()->json(['error' => 'User not found'], 404);
+            }
+
+            // Delete old image if exists
+            if ($user->profile_image) {
+                Storage::delete($user->profile_image);
+            }
+
+            // Store new image
+            $path = $request->file('profile_image')->store('profile-images', 'public');
+            $user->profile_image = $path;
+            $user->save();
+
+            return response()->json([
+                'message' => 'Profile image updated successfully',
+                'profile_image_url' => Storage::url($path)
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Profile image update error: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Failed to update profile image',
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 }

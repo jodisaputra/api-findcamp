@@ -21,7 +21,10 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'firebase_uid'
+        'firebase_uid',
+        'profile_image',
+        'date_of_birth',
+        'country_id',
     ];
 
     /**
@@ -44,6 +47,12 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'date_of_birth' => 'date',
         ];
+    }
+
+    public function country()
+    {
+        return $this->belongsTo(Country::class);
     }
 }
